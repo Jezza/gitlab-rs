@@ -606,6 +606,29 @@ impl Gitlab {
         )
     }
 
+    /// Download a single artifact file for a specific job of the latest successful pipeline
+    /// for the given reference name from within the job’s artifacts archive.
+    /// The file is extracted from the archive and streamed to the client.
+    pub fn artifact<R, P, J, W>(
+        &self,
+        project: ProjectId,
+        ref_name: R,
+        artifact_path: P,
+        job: J,
+        out: &mut W,
+    ) -> GitlabResult<()>
+    where
+        R: AsRef<str>,
+        P: AsRef<str>,
+        J: AsRef<str>,
+        W: ?Sized + std::io::Write,
+    {
+        self.get_raw(
+            format!("projects/{}/jobs/artifacts/{}/raw/{}?job={}", project, ref_name.as_ref(), artifact_path.as_ref(), job.as_ref()),
+            out,
+        )
+    }
+
     /// Create a group
     ///
     /// # Arguments:
@@ -2066,6 +2089,25 @@ impl Gitlab {
 
         debug!(target: "gitlab", "received data: {:?}", v);
         serde_json::from_value::<T>(v).map_err(GitlabError::data_type::<T>)
+    }
+
+
+    /// Create a `GET` request to an API endpoint, but expects a non-json response.
+    fn get_raw<U, W>(&self, url: U, out: &mut W) -> GitlabResult<()>
+        where
+            U: AsRef<str>,
+            W: ?Sized + std::io::Write,
+    {
+        let full_url = self.create_url(url.as_ref())?;
+        let req = self.client.get(full_url);
+        let mut rsp = self.send_impl(req)?;
+        let status = rsp.status();
+        if !status.is_success() {
+            let v = serde_json::from_reader(rsp).map_err(GitlabError::json)?;
+            return Err(GitlabError::from_gitlab(v));
+        }
+        rsp.copy_to(out)?;
+        Ok(())
     }
 
     /// Create a `GET` request to an API endpoint.
